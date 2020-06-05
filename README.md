@@ -28,13 +28,13 @@ Then call it from the client:
 
 ```console
 $ export PDFRASTERIZER_TOKEN="doesntMatter" # optionally you can put the service behind authentication
-$ pdfrasterizer client-localhost example.pdf > example.jpg
+$ pdfrasterizer client-localhost example.pdf > example.png
 ```
 
 You can also use raw curl:
 
 ```console
-$ curl -H 'Content-Type: application/pdf' -X POST --data-binary @example.pdf http://localhost/rasterize > example.jpg
+$ curl -H 'Content-Type: application/pdf' -X POST --data-binary @example.pdf http://localhost/rasterize > example.png
 ```
 
 

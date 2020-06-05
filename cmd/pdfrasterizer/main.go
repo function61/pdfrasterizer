@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -48,49 +49,78 @@ func newServerHandler() http.Handler {
 			return
 		}
 
+		imageType := "image/png"
+		// doesn't use the features offered by HTTP's "Accept" mechanism, but that's pretty
+		// hard to parse (and this feature doesn't warrant vetting for negotiation library)
+		if r.Header.Get("Accept") == "image/jpeg" {
+			imageType = "image/jpeg"
+		}
+
 		// needs to be unique for each request. using named pipe because Ghostscript pollutes
 		// stdout with log messages, and therefore it doesn't support writing to work output there
 		outputPath, cleanup, err := randomFifoName()
 		if err != nil {
-			panic(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 		defer cleanup()
 
-		pipingDone := make(chan error, 1)
-
-		go func() {
-			output, err := os.Open(outputPath)
-			if err != nil {
-				panic(err)
+		gsDevice, err := func() (string, error) {
+			switch imageType {
+			case "image/jpeg":
+				return "jpeg", nil
+			case "image/png":
+				return "png16m", nil
+			default:
+				return "", fmt.Errorf("unsupported requested image type: %s", imageType)
 			}
-			defer output.Close()
-
-			_, err = io.Copy(w, output)
-			pipingDone <- err
 		}()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 
 		ghostscript := exec.Command(
 			"./gs",
-			"-sDEVICE=jpeg",
-			"-o", outputPath,
-			"-dJPEGQ=95",
 			"-dNOPAUSE",
 			"-dBATCH",
+			"-o", outputPath,
 			"-dUseCropBox",
-			"-r140",
-			"-", // = take from stdin
+			"-r300",               // internal rendering DPI
+			"-dDownScaleFactor=3", // 300/3 = 100 DPI
+			"-sDEVICE="+gsDevice,
+			"-dJPEGQ=95", // does not error when given to PNG also
+			"-",          // = take from stdin
 		)
 		ghostscript.Stdin = r.Body
 		defer r.Body.Close()
 
-		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Content-Type", imageType)
 
-		if err := ghostscript.Run(); err != nil {
-			panic(err)
+		// Ghostscript and reading from FIFO need to happen concurrently, b/c writing to
+		// the FIFO blocks until the bytes are consumed
+		outputDone := runSimpleTaskAsync(func() error {
+			ghostscriptOutput, err := os.Open(outputPath)
+			if err != nil {
+				return err
+			}
+			defer ghostscriptOutput.Close()
+
+			// send image to client
+			_, err = io.Copy(w, ghostscriptOutput)
+			return err
+		})
+
+		ghostscriptDone := runSimpleTaskAsync(func() error {
+			return ghostscript.Run()
+		})
+
+		if err := <-ghostscriptDone; err != nil {
+			log.Printf("ghostscript run: %v", err)
 		}
 
-		if err := <-pipingDone; err != nil {
-			log.Printf("pipe err: %v", err)
+		if err := <-outputDone; err != nil {
+			log.Printf("output err: %v", err)
 		}
 	})
 
@@ -124,7 +154,7 @@ func client(ctx context.Context, path string, output io.Writer, baseUrl string) 
 	}
 	defer input.Close()
 
-	rasterized, err := client.Rasterize(ctx, input)
+	rasterized, err := client.RasterizeToPng(ctx, input)
 	if err != nil {
 		return err
 	}
@@ -146,4 +176,12 @@ func randomFifoName() (string, func(), error) {
 			log.Printf("randomFifoName cleanup: %v", err)
 		}
 	}, nil
+}
+
+func runSimpleTaskAsync(fn func() error) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- fn()
+	}()
+	return errCh
 }

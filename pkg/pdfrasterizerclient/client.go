@@ -39,15 +39,31 @@ func New(baseUrl string, getToken TokenFn) (*Client, error) {
 }
 
 // returns JPEG bytes
-func (c *Client) Rasterize(
+func (c *Client) RasterizeToJpeg(
 	ctx context.Context,
 	pdfBytes io.Reader,
+) (io.ReadCloser, error) {
+	return c.rasterizeToFormat(ctx, pdfBytes, "image/jpeg")
+}
+
+// returns PNG bytes
+func (c *Client) RasterizeToPng(
+	ctx context.Context,
+	pdfBytes io.Reader,
+) (io.ReadCloser, error) {
+	return c.rasterizeToFormat(ctx, pdfBytes, "image/png")
+}
+
+func (c *Client) rasterizeToFormat(
+	ctx context.Context,
+	pdfBytes io.Reader,
+	format string,
 ) (io.ReadCloser, error) {
 	resp, err := ezhttp.Post(
 		ctx,
 		c.baseUrl+"/rasterize",
 		ezhttp.AuthBearer(c.bearerToken),
-		ezhttp.Header("Accept", "image/jpeg"),
+		ezhttp.Header("Accept", format),
 		ezhttp.SendBody(pdfBytes, "application/pdf"))
 	if err != nil {
 		return nil, fmt.Errorf("PDF rasterizer: %w", err)
