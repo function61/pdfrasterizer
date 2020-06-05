@@ -86,6 +86,8 @@ func newServerHandler() http.Handler {
 			"-dBATCH",
 			"-o", outputPath,
 			"-dUseCropBox",
+			"-dFirstPage=1", // this and next combined: only read the first page
+			"-dLastPage=1",
 			"-r300",               // internal rendering DPI
 			"-dDownScaleFactor=3", // 300/3 = 100 DPI
 			"-sDEVICE="+gsDevice,
