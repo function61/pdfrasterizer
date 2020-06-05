@@ -56,15 +56,6 @@ func newServerHandler() http.Handler {
 			imageType = "image/jpeg"
 		}
 
-		// needs to be unique for each request. using named pipe because Ghostscript pollutes
-		// stdout with log messages, and therefore it doesn't support writing to work output there
-		outputPath, cleanup, err := randomFifoName()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer cleanup()
-
 		gsDevice, err := func() (string, error) {
 			switch imageType {
 			case "image/jpeg":
@@ -80,22 +71,14 @@ func newServerHandler() http.Handler {
 			return
 		}
 
-		ghostscript := exec.Command(
-			"./gs",
-			"-dNOPAUSE",
-			"-dBATCH",
-			"-o", outputPath,
-			"-dUseCropBox",
-			"-dFirstPage=1", // this and next combined: only read the first page
-			"-dLastPage=1",
-			"-r300",               // internal rendering DPI
-			"-dDownScaleFactor=3", // 300/3 = 100 DPI
-			"-sDEVICE="+gsDevice,
-			"-dJPEGQ=95", // does not error when given to PNG also
-			"-",          // = take from stdin
-		)
-		ghostscript.Stdin = r.Body
-		defer r.Body.Close()
+		// needs to be unique for each request. using named pipe because Ghostscript pollutes
+		// stdout with log messages, and therefore it doesn't support writing to work output there
+		outputPath, cleanup, err := randomFifoName()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer cleanup()
 
 		w.Header().Set("Content-Type", imageType)
 
@@ -114,6 +97,22 @@ func newServerHandler() http.Handler {
 		})
 
 		ghostscriptDone := runSimpleTaskAsync(func() error {
+			ghostscript := exec.Command(
+				"./gs",
+				"-dNOPAUSE",
+				"-dBATCH",
+				"-o", outputPath,
+				"-dUseCropBox",
+				"-dFirstPage=1", // this and next combined: only read the first page
+				"-dLastPage=1",
+				"-r300",               // internal rendering DPI
+				"-dDownScaleFactor=3", // 300/3 = 100 DPI
+				"-sDEVICE="+gsDevice,
+				"-dJPEGQ=95", // does not error when given to PNG also
+				"-",          // = take from stdin
+			)
+			ghostscript.Stdin = r.Body
+
 			return ghostscript.Run()
 		})
 
